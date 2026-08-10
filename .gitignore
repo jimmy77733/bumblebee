@@ -9,5 +9,7 @@
 .vscode/
 
 # goreleaser output
-/dist/
+/dist/*
+!/dist/windows/
+!/dist/windows/**
 /.gotmp/

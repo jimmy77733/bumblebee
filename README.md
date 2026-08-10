@@ -26,7 +26,9 @@ threat_intel\.upstream-revision
 
 官方 `threat_intel` 只在你確認後才下載覆蓋本機清單。程式啟動時會檢查一次，並登錄每日 09:00 的工作排程器靜默檢查；離線則沿用本機清單。
 
-在儲存庫根目錄建置：
+預編譯 Windows 包在 [`dist/windows/`](dist/windows/)：下載整個資料夾後雙擊 `Bumblebee.exe`（須與 `threat_intel\` 同層）。
+
+在儲存庫根目錄自行建置：
 
 ```powershell
 powershell -File .\scripts\build-windows.ps1
