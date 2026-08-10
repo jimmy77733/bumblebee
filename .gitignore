@@ -1,4 +1,7 @@
 /bumblebee
+/bumblebee.exe
+/bumblebee-cli.exe
+/Bumblebee.exe
 *.test
 *.out
 *.ndjson
@@ -7,3 +10,4 @@
 
 # goreleaser output
 /dist/
+/.gotmp/

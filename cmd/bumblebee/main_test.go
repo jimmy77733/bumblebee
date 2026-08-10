@@ -53,6 +53,7 @@ func TestResolveDeviceIDEmptyEnv(t *testing.T) {
 func TestIsBroadHomeRoot(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 
 	broad := []string{
 		home,
@@ -90,11 +91,12 @@ func TestIsBroadHomeRoot(t *testing.T) {
 // profile's curated defaults do not include developer/project trees —
 // those belong to the project profile.
 func TestResolveRootsBaselineExcludesProjectTrees(t *testing.T) {
-	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
-		t.Skipf("profile defaults are darwin/linux specific")
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" && runtime.GOOS != "windows" {
+		t.Skipf("profile defaults are darwin/linux/windows specific")
 	}
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	codeDir := filepath.Join(home, "code")
 	if err := os.MkdirAll(codeDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -117,6 +119,7 @@ func TestResolveRootsBaselineExcludesProjectTrees(t *testing.T) {
 func TestResolveRootsProjectIncludesCodeDir(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	codeDir := filepath.Join(home, "code")
 	if err := os.MkdirAll(codeDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -139,6 +142,7 @@ func TestResolveRootsProjectIncludesCodeDir(t *testing.T) {
 func TestResolveRootsBaselineIncludesUserLocalPython(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	pyRoot := filepath.Join(home, ".local", "lib", "python3.12")
 	if err := os.MkdirAll(filepath.Join(pyRoot, "site-packages"), 0o755); err != nil {
 		t.Fatal(err)
@@ -162,11 +166,12 @@ func TestResolveRootsBaselineIncludesUserLocalPython(t *testing.T) {
 // cross-platform Claude/Codex/Gemini user-home dotfiles are included in
 // baseline MCP roots when present, and dropped when absent.
 func TestResolveRootsBaselineIncludesClaudeAndCodexMCPRoots(t *testing.T) {
-	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
-		t.Skipf("profile defaults are darwin/linux specific")
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" && runtime.GOOS != "windows" {
+		t.Skipf("profile defaults are darwin/linux/windows specific")
 	}
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	want := []string{
 		filepath.Join(home, ".claude"),
 		filepath.Join(home, ".codex"),
@@ -206,11 +211,12 @@ func TestResolveRootsBaselineIncludesClaudeAndCodexMCPRoots(t *testing.T) {
 // and short-circuiting on an empty-defaults error would let regressions
 // slip through silently.
 func TestResolveRootsBaselineSkipsAbsentClaudeCodexRoots(t *testing.T) {
-	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
-		t.Skipf("profile defaults are darwin/linux specific")
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" && runtime.GOOS != "windows" {
+		t.Skipf("profile defaults are darwin/linux/windows specific")
 	}
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	// Provide one unrelated default so the baseline run does not fail
 	// with "no default roots". `~/go` is not one of the MCP candidates
 	// under test, so its presence cannot mask the assertion below.
@@ -240,12 +246,13 @@ func TestResolveRootsBaselineSkipsAbsentClaudeCodexRoots(t *testing.T) {
 // TestResolveRootsBaselineIncludesAgentSkillRoot verifies that ~/.agents
 // (and the XDG override) are picked up by baseline when present.
 func TestResolveRootsBaselineIncludesAgentSkillRoot(t *testing.T) {
-	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
-		t.Skipf("profile defaults are darwin/linux specific")
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" && runtime.GOOS != "windows" {
+		t.Skipf("profile defaults are darwin/linux/windows specific")
 	}
 	home := t.TempDir()
 	xdg := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_STATE_HOME", xdg)
 
 	agents := filepath.Join(home, ".agents")
@@ -294,11 +301,12 @@ func TestClassifyRootAgentSkill(t *testing.T) {
 // present. Unlike the other MCP candidates it is a regular file, not a
 // directory, so this also exercises filterExistingRoots keeping files.
 func TestResolveRootsBaselineIncludesClaudeJSONFileRoot(t *testing.T) {
-	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
-		t.Skipf("profile defaults are darwin/linux specific")
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" && runtime.GOOS != "windows" {
+		t.Skipf("profile defaults are darwin/linux/windows specific")
 	}
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	claudeJSON := filepath.Join(home, ".claude.json")
 	if err := os.WriteFile(claudeJSON, []byte(`{"mcpServers":{}}`), 0o644); err != nil {
 		t.Fatal(err)
@@ -344,6 +352,7 @@ func TestClassifyRootClaudeCodexMCP(t *testing.T) {
 func TestResolveRootsBaselineRefusesBroadHome(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	_, _, err := resolveRoots(model.ProfileBaseline, []string{home}, rootsOpts{})
 	if err == nil {
 		t.Fatalf("expected refusal for baseline+%q", home)
@@ -356,6 +365,7 @@ func TestResolveRootsBaselineRefusesBroadHome(t *testing.T) {
 func TestResolveRootsProjectRefusesBroadHome(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	_, _, err := resolveRoots(model.ProfileProject, []string{home}, rootsOpts{})
 	if err == nil {
 		t.Fatalf("expected refusal for project+%q", home)
@@ -365,6 +375,7 @@ func TestResolveRootsProjectRefusesBroadHome(t *testing.T) {
 func TestResolveRootsDeepAllowsBroadHome(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	roots, _, err := resolveRoots(model.ProfileDeep, []string{home}, rootsOpts{})
 	if err != nil {
 		t.Fatalf("deep should accept broad home root: %v", err)
@@ -380,6 +391,7 @@ func TestResolveRootsDeepAllowsBroadHome(t *testing.T) {
 func TestResolveRootsDeepRequiresExplicitRoot(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	_, _, err := resolveRoots(model.ProfileDeep, nil, rootsOpts{})
 	if err == nil {
 		t.Fatalf("deep with no roots should error")
@@ -619,6 +631,7 @@ func TestResolveRootsAllUsersUnsupportedPlatformsNote(t *testing.T) {
 	}
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	pyRoot := filepath.Join(home, ".local", "lib", "python3.12")
 	if err := os.MkdirAll(pyRoot, 0o755); err != nil {
 		t.Fatal(err)
@@ -746,6 +759,7 @@ func TestRunScanRejectsInvalidEcosystem(t *testing.T) {
 func TestRunRootsRejectsUnknownProfile(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	code := runRoots([]string{"--profile", "scheduled"})
 	if code != 2 {
 		t.Fatalf("runRoots --profile=scheduled exit = %d, want 2 (unknown profile)", code)

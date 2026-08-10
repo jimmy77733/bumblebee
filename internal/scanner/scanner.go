@@ -64,17 +64,7 @@ func isExpectedAccessError(err error) bool {
 	if errors.Is(err, os.ErrPermission) || errors.Is(err, fs.ErrPermission) {
 		return true
 	}
-	// macOS TCC denials surface as EPERM ("operation not permitted")
-	// rather than EACCES; cover both.
-	var errno syscall.Errno
-	if errors.As(err, &errno) {
-		switch errno {
-		case syscall.EACCES, syscall.EPERM:
-			return true
-		}
-	}
-
-	return false
+	return isSyscallPermission(err)
 }
 
 // isMissingPathError reports whether err is a "no such file or directory"
@@ -93,6 +83,12 @@ func isMissingPathError(err error) bool {
 		return errno == syscall.ENOENT
 	}
 	return false
+}
+
+type Progress struct {
+	FilesConsidered int
+	FindingsEmitted int
+	CurrentPath     string
 }
 
 type Config struct {
@@ -114,6 +110,9 @@ type Config struct {
 
 	BaseRecord model.Record
 	Emitter    *output.Emitter
+
+	OnProgress func(Progress)
+	OnFinding  func(model.Finding)
 }
 
 type Result struct {
@@ -235,6 +234,9 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 					findingsMu.Lock()
 					findingsEmitted++
 					findingsMu.Unlock()
+					if cfg.OnFinding != nil {
+						cfg.OnFinding(f)
+					}
 				} else {
 					setEmitErr(fmt.Errorf("emit finding record: %w", err))
 					break
@@ -339,6 +341,28 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 	}
 
 	var filesConsidered int
+	var lastProgress time.Time
+	var consideredSinceReport int
+	notifyProgress := func(path string, force bool) {
+		if cfg.OnProgress == nil {
+			return
+		}
+		consideredSinceReport++
+		now := time.Now()
+		if !force && consideredSinceReport < 20 && now.Sub(lastProgress) < 150*time.Millisecond {
+			return
+		}
+		consideredSinceReport = 0
+		lastProgress = now
+		findingsMu.Lock()
+		n := findingsEmitted
+		findingsMu.Unlock()
+		cfg.OnProgress(Progress{
+			FilesConsidered: filesConsidered,
+			FindingsEmitted: n,
+			CurrentPath:     path,
+		})
+	}
 	excludes := append([]string{}, walk.DefaultExcludes...)
 	excludes = append(excludes, cfg.Excludes...)
 	walkOpts := walk.Options{
@@ -407,6 +431,7 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 			return nil
 		}
 		filesConsidered++
+		notifyProgress(path, false)
 		switch {
 		case enabled(model.EcosystemNPM) && npm.IsLockfile(base):
 			send(job{kind: "npm-lock", path: path})
@@ -493,6 +518,7 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 
 	close(jobs)
 	wg.Wait()
+	notifyProgress("", true)
 
 	res := Result{
 		FilesConsidered: filesConsidered,

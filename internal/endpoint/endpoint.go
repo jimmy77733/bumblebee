@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/user"
 	"runtime"
-	"strconv"
 
 	"github.com/perplexityai/bumblebee/internal/model"
 )
@@ -28,7 +27,7 @@ func Current(deviceID string) model.Endpoint {
 		ep.Username = u.Username
 		ep.UID = u.Uid
 	} else {
-		ep.UID = strconv.Itoa(os.Getuid())
+		ep.UID = fallbackUID()
 	}
 	return ep
 }

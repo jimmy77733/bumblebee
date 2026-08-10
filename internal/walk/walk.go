@@ -159,6 +159,11 @@ var DefaultExcludes = []string{
 	".windsurf-server/bin",
 	".windsurf-server/cli",
 	".windsurf-server/logs",
+
+	"AppData/Local/Temp",
+	"AppData/Local/Microsoft",
+	"AppData/Local/Packages",
+	"AppData/LocalLow",
 }
 
 // Visitor is called for every directory entry the walker decides to surface.
