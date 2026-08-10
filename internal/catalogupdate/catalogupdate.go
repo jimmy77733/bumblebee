@@ -58,6 +58,34 @@ func ReadLocalSHA(catalogDir string) string {
 	return strings.TrimSpace(string(b))
 }
 
+func SourceLabel() string {
+	return DefaultRepo + " / " + DefaultPath
+}
+
+func LocalUpdatedAt(catalogDir string) string {
+	var latest time.Time
+	check := func(p string) {
+		info, err := os.Stat(p)
+		if err != nil {
+			return
+		}
+		if info.ModTime().After(latest) {
+			latest = info.ModTime()
+		}
+	}
+	check(catalogDir)
+	check(RevisionPath(catalogDir))
+	if matches, err := filepath.Glob(filepath.Join(catalogDir, "*.json")); err == nil {
+		for _, p := range matches {
+			check(p)
+		}
+	}
+	if latest.IsZero() {
+		return "未知"
+	}
+	return latest.Local().Format("2006-01-02 15:04:05")
+}
+
 func WriteLocalSHA(catalogDir string, sha string) error {
 	if err := os.MkdirAll(catalogDir, 0o755); err != nil {
 		return err

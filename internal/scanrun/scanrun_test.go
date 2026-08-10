@@ -82,6 +82,7 @@ func TestRunProducesHTMLReport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("BUMBLEBEE_REPORT_DIR", t.TempDir())
 	oc := Run(context.Background(), Options{
 		Mode:       "指定目錄",
 		Profile:    model.ProfileDeep,
@@ -101,6 +102,12 @@ func TestRunProducesHTMLReport(t *testing.T) {
 	html := string(b)
 	if !strings.Contains(html, "bumblebee-selftest-evil") {
 		t.Fatalf("report missing finding: %s", html)
+	}
+	if !strings.Contains(html, "官方 GitHub：perplexityai/bumblebee / threat_intel") {
+		t.Fatal("missing catalog source")
+	}
+	if !strings.Contains(html, catalogDir) {
+		t.Fatal("missing catalog path")
 	}
 	if len(oc.Findings) == 0 {
 		t.Fatal("expected at least one finding")

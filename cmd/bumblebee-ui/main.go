@@ -5,7 +5,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"math"
 	"os"
 	"strings"
 	"time"
@@ -14,7 +13,6 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
-	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/perplexityai/bumblebee/internal/catalogupdate"
@@ -37,21 +35,35 @@ func main() {
 
 func runUI() {
 	a := app.NewWithID("bumblebee.windows.gui")
+	light := a.Preferences().BoolWithFallback(prefLightTheme, false)
+	a.Settings().SetTheme(newBumbleTheme(light))
 	w := a.NewWindow("Bumblebee")
-	w.Resize(fyne.NewSize(680, 460))
+	w.Resize(fyne.NewSize(740, 560))
 
 	catalogDir, catErr := scanrun.ResolveCatalogDir()
 	lastReport := ""
 	scanning := false
+	checking := false
 	hasCatalogUpdate := false
+	statusBase := "就緒"
+	var anim progressAnim
 
 	title := widget.NewLabelWithStyle("Bumblebee", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+	title.Importance = widget.HighImportance
 	disclaimer := widget.NewLabel("僅比對已知曝光清單中的精確套件版本，不是 CVE 掃描，也不會讀取或執行原始碼。不會掃描整顆 C 槽。")
 	disclaimer.Wrapping = fyne.TextWrapWord
+	disclaimer.Importance = widget.LowImportance
+	themeBtn := widget.NewButton(themeToggleLabel(light), nil)
+	themeBtn.OnTapped = func() {
+		light = !light
+		a.Preferences().SetBool(prefLightTheme, light)
+		a.Settings().SetTheme(newBumbleTheme(light))
+		themeBtn.SetText(themeToggleLabel(light))
+		w.Content().Refresh()
+	}
 
-	progress := widget.NewProgressBar()
-	status := widget.NewLabel("就緒")
-	status.Wrapping = fyne.TextWrapWord
+	progress := newThinProgressBar()
+	statusHead, statusPath, statusBox := newScanStatus()
 	catalogStatus := widget.NewLabel("清單：檢查中…")
 	catalogStatus.Wrapping = fyne.TextWrapWord
 
@@ -62,8 +74,29 @@ func runUI() {
 	checkBtn := widget.NewButton("立即檢查更新", nil)
 	dirBtn := widget.NewButton("掃描指定目錄", nil)
 	smartBtn := widget.NewButton("智能掃描", nil)
+	dirBtn.Importance = widget.HighImportance
+	smartBtn.Importance = widget.HighImportance
 
-	setBusy := func(busy bool) {
+	paintStatus := func(text string, imp widget.Importance) {
+		statusBase = text
+		head, path := splitStatusText(text)
+		eta := anim.ETAText()
+		if eta != "" {
+			head = head + "　　" + eta
+		}
+		statusHead.Importance = imp
+		statusPath.Importance = imp
+		statusHead.SetText(head)
+		statusPath.SetText(path)
+		statusHead.Refresh()
+		statusPath.Refresh()
+	}
+
+	refreshStatusLine := func() {
+		paintStatus(statusBase, statusHead.Importance)
+	}
+
+	setScanBusy := func(busy bool) {
 		scanning = busy
 		if busy {
 			dirBtn.Disable()
@@ -75,12 +108,16 @@ func runUI() {
 		}
 		dirBtn.Enable()
 		smartBtn.Enable()
-		checkBtn.Enable()
+		if !checking {
+			checkBtn.Enable()
+		}
 		if hasCatalogUpdate {
 			updateBtn.Enable()
 		}
 		if lastReport != "" {
 			viewBtn.Enable()
+			viewBtn.Importance = widget.SuccessImportance
+			viewBtn.Refresh()
 		}
 	}
 
@@ -95,6 +132,8 @@ func runUI() {
 				} else {
 					catalogStatus.SetText("清單：離線（" + shortSHA(sha) + "）")
 				}
+				catalogStatus.Importance = widget.WarningImportance
+				catalogStatus.Refresh()
 				updateBtn.Disable()
 				return
 			}
@@ -103,26 +142,52 @@ func runUI() {
 		hasCatalogUpdate = st.UpdateAvailable
 		if st.UpdateAvailable {
 			text += "　官方曝光清單有更新"
+			catalogStatus.Importance = widget.WarningImportance
+			updateBtn.Importance = widget.WarningImportance
 			if !scanning {
 				updateBtn.Enable()
 			}
 		} else {
+			catalogStatus.Importance = widget.SuccessImportance
+			updateBtn.Importance = widget.MediumImportance
 			updateBtn.Disable()
 		}
 		catalogStatus.SetText(text)
+		catalogStatus.Refresh()
+		updateBtn.Refresh()
 	}
 
 	runCheck := func() {
-		if catalogDir == "" {
+		if catalogDir == "" || scanning || checking {
 			return
 		}
+		checking = true
+		checkBtn.Disable()
+		anim.Start(8*time.Second, progress, refreshStatusLine)
+		paintStatus("正在檢查官方清單…", widget.WarningImportance)
 		go func() {
 			st, err := catalogupdate.NewClient().Check(context.Background(), catalogDir)
-			fyne.Do(func() { refreshCatalog(st, err) })
+			fyne.Do(func() {
+				checking = false
+				anim.Finish()
+				refreshCatalog(st, err)
+				if !scanning {
+					checkBtn.Enable()
+				}
+				if err != nil {
+					paintStatus("清單檢查失敗，沿用本機清單", widget.WarningImportance)
+					return
+				}
+				if st.UpdateAvailable {
+					paintStatus("官方曝光清單有更新", widget.WarningImportance)
+					return
+				}
+				paintStatus("清單已是最新", widget.SuccessImportance)
+			})
 		}()
 	}
 
-	startScan := func(mode, profile string, scanRoots []scanner.Root) {
+	startScan := func(mode, profile string, scanRoots []scanner.Root, expected time.Duration) {
 		if scanning {
 			return
 		}
@@ -130,9 +195,10 @@ func runUI() {
 			dialog.ShowError(catErr, w)
 			return
 		}
-		setBusy(true)
-		progress.SetValue(0)
-		status.SetText("開始掃描…")
+		checking = false
+		setScanBusy(true)
+		anim.Start(expected, progress, refreshStatusLine)
+		paintStatus("開始掃描…", widget.WarningImportance)
 		go func() {
 			oc := scanrun.Run(context.Background(), scanrun.Options{
 				Mode:       mode,
@@ -141,32 +207,39 @@ func runUI() {
 				CatalogDir: catalogDir,
 				OnProgress: func(p scanner.Progress) {
 					fyne.Do(func() {
-						progress.SetValue(progressValue(p.FilesConsidered))
 						msg := fmt.Sprintf("已檢查 %d 個檔案，曝光 %d 筆", p.FilesConsidered, p.FindingsEmitted)
 						if p.CurrentPath != "" {
 							msg += "\n" + p.CurrentPath
 						}
-						status.SetText(msg)
+						paintStatus(msg, widget.WarningImportance)
 					})
 				},
 			})
 			fyne.Do(func() {
-				setBusy(false)
+				anim.Finish()
+				setScanBusy(false)
 				if oc.Report != "" {
 					lastReport = oc.Report
 					viewBtn.Enable()
+					viewBtn.Importance = widget.SuccessImportance
+					viewBtn.Refresh()
 				}
-				progress.SetValue(1)
 				if oc.Err != nil && oc.Status == model.ScanStatusError {
-					status.SetText("掃描失敗：" + oc.Err.Error())
+					paintStatus("掃描失敗："+oc.Err.Error(), widget.DangerImportance)
 					dialog.ShowError(oc.Err, w)
 					return
 				}
+				imp := widget.SuccessImportance
 				msg := fmt.Sprintf("掃描完成：%s，曝光 %d 筆，套件 %d 筆，檔案 %d", oc.Status, len(oc.Findings), oc.Result.RecordsEmitted, oc.Result.FilesConsidered)
+				if len(oc.Findings) > 0 {
+					imp = widget.WarningImportance
+					msg = fmt.Sprintf("發現 %d 筆曝光 · %s · 套件 %d · 檔案 %d", len(oc.Findings), oc.Status, oc.Result.RecordsEmitted, oc.Result.FilesConsidered)
+				}
 				if oc.Err != nil {
+					imp = widget.WarningImportance
 					msg += "（" + oc.Err.Error() + "）"
 				}
-				status.SetText(msg)
+				paintStatus(msg, imp)
 				if oc.Report != "" {
 					_ = openurl.File(oc.Report)
 				}
@@ -188,7 +261,7 @@ func runUI() {
 				dialog.ShowError(rerr, w)
 				return
 			}
-			startScan("指定目錄", model.ProfileDeep, r)
+			startScan("指定目錄", model.ProfileDeep, r, 30*time.Second)
 		}, w)
 	}
 	smartBtn.OnTapped = func() {
@@ -197,7 +270,7 @@ func runUI() {
 			dialog.ShowError(err, w)
 			return
 		}
-		startScan("智能掃描", model.ProfileDeep, r)
+		startScan("智能掃描", model.ProfileDeep, r, 90*time.Second)
 	}
 	viewBtn.OnTapped = func() {
 		if lastReport == "" {
@@ -222,48 +295,58 @@ func runUI() {
 				dialog.ShowInformation("清單", "目前已是官方最新清單。", w)
 				return
 			}
-			setBusy(true)
-			status.SetText("正在下載官方清單…")
+			setScanBusy(true)
+			anim.Start(12*time.Second, progress, refreshStatusLine)
+			paintStatus("正在下載官方清單…", widget.WarningImportance)
 			go func() {
 				aerr := catalogupdate.NewClient().Apply(context.Background(), catalogDir, st.RemoteSHA)
 				fyne.Do(func() {
-					setBusy(false)
+					anim.Finish()
+					setScanBusy(false)
 					if aerr != nil {
-						status.SetText("更新清單失敗")
+						paintStatus("更新清單失敗", widget.DangerImportance)
 						dialog.ShowError(aerr, w)
 						return
 					}
 					st.LocalSHA = st.RemoteSHA
 					st.UpdateAvailable = false
 					refreshCatalog(st, nil)
-					status.SetText("已套用官方曝光清單 " + shortSHA(st.RemoteSHA))
+					paintStatus("已套用官方曝光清單 "+shortSHA(st.RemoteSHA), widget.SuccessImportance)
 				})
 			}()
 		}, w)
 	}
 	checkBtn.OnTapped = func() {
-		status.SetText("正在檢查官方清單…")
 		runCheck()
 	}
 
-	buttons := container.NewHBox(dirBtn, smartBtn, viewBtn)
-	catalogRow := container.NewHBox(updateBtn, checkBtn)
-	content := container.NewVBox(
-		title,
-		disclaimer,
-		widget.NewSeparator(),
-		buttons,
+	scanBlock := container.NewPadded(container.NewVBox(
+		widget.NewLabelWithStyle("掃描", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		container.NewHBox(dirBtn, smartBtn, viewBtn),
 		progress,
-		status,
-		widget.NewSeparator(),
+		statusBox,
+	))
+	catalogBlock := container.NewPadded(container.NewVBox(
+		widget.NewLabelWithStyle("曝光清單", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		catalogStatus,
-		catalogRow,
-		layout.NewSpacer(),
+		container.NewHBox(updateBtn, checkBtn),
+	))
+	content := container.NewVBox(
+		container.NewPadded(container.NewVBox(
+			container.NewBorder(nil, nil, nil, themeBtn, title),
+			disclaimer,
+		)),
+		widget.NewSeparator(),
+		scanBlock,
+		widget.NewSeparator(),
+		catalogBlock,
 	)
 	w.SetContent(container.NewPadded(content))
 
 	if catErr != nil {
 		catalogStatus.SetText("找不到 threat_intel：" + catErr.Error())
+		catalogStatus.Importance = widget.DangerImportance
+		paintStatus("找不到 threat_intel", widget.DangerImportance)
 	} else {
 		if exe, err := os.Executable(); err == nil {
 			_ = catalogupdate.EnsureDailyTask(exe)
@@ -298,15 +381,4 @@ func catalogDate(st catalogupdate.Status, catalogDir string) string {
 		return info.ModTime().Format("2006-01-02")
 	}
 	return "未知日期"
-}
-
-func progressValue(files int) float64 {
-	if files <= 0 {
-		return 0.02
-	}
-	v := 1 - math.Exp(-float64(files)/800)
-	if v > 0.97 {
-		return 0.97
-	}
-	return v
 }

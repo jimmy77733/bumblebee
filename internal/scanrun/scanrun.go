@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/perplexityai/bumblebee/internal/catalogupdate"
 	"github.com/perplexityai/bumblebee/internal/endpoint"
 	"github.com/perplexityai/bumblebee/internal/exposure"
 	"github.com/perplexityai/bumblebee/internal/htmlreport"
@@ -168,6 +169,10 @@ func Run(ctx context.Context, opts Options) Outcome {
 		return oc
 	}
 	data := htmlreport.FromScan(opts.Mode, oc.Status, res.Duration, res.FilesConsidered, res.RecordsEmitted, rootPaths, findings)
+	data.CatalogSource = "官方 GitHub：" + catalogupdate.SourceLabel()
+	data.CatalogPath = catalogDir
+	data.CatalogSHA = catalogupdate.ReadLocalSHA(catalogDir)
+	data.CatalogUpdated = catalogupdate.LocalUpdatedAt(catalogDir)
 	if err := htmlreport.WriteFile(reportPath, data); err != nil {
 		oc.Err = err
 		return oc
